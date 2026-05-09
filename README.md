@@ -1,4 +1,4 @@
-# POtoCSV
+# PoConverter
 
 指定したディレクトリ内にあるすべてのPOファイルの内容をマージして、1つのCSVファイルとして指定したファイルパスに出力するコンソールアプリケーション。  
 引数は以下とする  
@@ -6,7 +6,7 @@
 -input POファイル格納ディレクトリ  
 -output CSVファイル出力ファイルパス  
 
-例：POtoCSV.exe -input C:\Temp\foo -output C:\Temp\bar.csv  
+例：PoConverter.exe -input C:\Temp\foo -output C:\Temp\bar.csv  
 
 どちらの引数も必須とする。  
 
@@ -32,6 +32,6 @@ CSVのヘッダ行は、poファイルがある直近のディレクトリ名と
 
 dotnet publish -c Release -r win-x64 --self-contained false
 
-./POtoCSV.exe -input C:\Temp\Localization\game -output C:\Temp\Localization\Game.csv
+./PoConverter -input C:\Temp\Localization\game -output C:\Temp\Localization\Game.csv
 
-./POtoCSV.exe -po -output C:\Temp\Localization\Game2 -input C:\Temp\Localization\Game.csv
+./PoConverter -po -output C:\Temp\Localization\Game2 -input C:\Temp\Localization\Game.csv
