@@ -1,11 +1,20 @@
 using System.Text;
 
-var poMode = args.Contains("-po");
+var modeIndex = Array.IndexOf(args, "-mode");
+var modeValue = modeIndex >= 0 && modeIndex + 1 < args.Length ? args[modeIndex + 1] : "csv";
+
+if (modeValue != "csv" && modeValue != "po")
+{
+    Console.Error.WriteLine($"Error: -mode の値が不正です: {modeValue}（csv または po を指定してください）");
+    return 1;
+}
+
+var poMode = modeValue == "po";
 
 if (!TryParseArgs(args, out var inputDir, out var outputFile))
 {
-    Console.Error.WriteLine("Usage: POtoCSV.exe -input <po-directory> -output <csv-filepath>");
-    Console.Error.WriteLine("       POtoCSV.exe -po -input <csv-filepath> -output <po-directory>");
+    Console.Error.WriteLine("Usage: PoConverter.exe [-mode csv] -input <po-directory> -output <csv-filepath>");
+    Console.Error.WriteLine("       PoConverter.exe -mode po -input <csv-filepath> -output <po-directory>");
     return 1;
 }
 
