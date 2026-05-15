@@ -61,7 +61,6 @@ var languages = columnOrder
     .ToList();
 
 var translations = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
-var msgids = new Dictionary<string, string>();
 var msgidOrder = new List<string>();
 
 foreach (var lang in languages)
@@ -70,14 +69,12 @@ foreach (var lang in languages)
 
     foreach (var poFile in Directory.GetFiles(langDirMap[lang], "*.po"))
     {
-        foreach (var (msgctxt, msgid, msgstr) in ParsePoFile(poFile))
+        foreach (var (msgid, msgstr) in ParsePoFile(poFile))
         {
-            var key = !string.IsNullOrEmpty(msgctxt) ? msgctxt : msgid;
-            if (string.IsNullOrEmpty(key)) continue;
-            translations[lang].TryAdd(key, msgstr);
-            msgids.TryAdd(key, msgid);
-            if (!msgidOrder.Contains(key))
-                msgidOrder.Add(key);
+            if (string.IsNullOrEmpty(msgid)) continue;
+            translations[lang].TryAdd(msgid, msgstr);
+            if (!msgidOrder.Contains(msgid))
+                msgidOrder.Add(msgid);
         }
     }
 }
@@ -85,15 +82,14 @@ foreach (var lang in languages)
 using var writer = new StreamWriter(outputFile, false, new UTF8Encoding(true));
 
 var headerCols = languages.Select(l => QuoteCsv(headerLabels.TryGetValue(l, out var label) ? label : l));
-writer.Write(QuoteCsv("KEY") + "," + QuoteCsv("msgid") + "," + string.Join(",", headerCols));
+writer.Write(QuoteCsv("msgid") + "," + string.Join(",", headerCols));
 writer.Write("\r\n");
 
-foreach (var key in msgidOrder)
+foreach (var msgid in msgidOrder)
 {
-    var mid = msgids.TryGetValue(key, out var m) ? QuoteCsv(m) : "\"\"";
     var row = languages.Select(lang =>
-        translations[lang].TryGetValue(key, out var val) ? QuoteCsv(val) : "\"\"");
-    writer.Write(QuoteCsv(key) + "," + mid + "," + string.Join(",", row));
+        translations[lang].TryGetValue(msgid, out var val) ? QuoteCsv(val) : "\"\"");
+    writer.Write(QuoteCsv(msgid) + "," + string.Join(",", row));
     writer.Write("\r\n");
 }
 
@@ -112,53 +108,35 @@ static bool TryParseArgs(string[] args, out string inputDir, out string outputFi
     return !string.IsNullOrEmpty(inputDir) && !string.IsNullOrEmpty(outputFile);
 }
 
-static IEnumerable<(string msgctxt, string msgid, string msgstr)> ParsePoFile(string filePath)
+static IEnumerable<(string msgid, string msgstr)> ParsePoFile(string filePath)
 {
     var lines = File.ReadAllLines(filePath, Encoding.UTF8);
-    string? msgctxt = null;
     string? msgid = null;
     string? msgstr = null;
-    bool inMsgctxt = false;
     bool inMsgid = false;
     bool inMsgstr = false;
 
     foreach (var line in lines)
     {
-        if (line.StartsWith("msgctxt "))
+        if (line.StartsWith("msgid "))
         {
             if (msgid != null && msgstr != null)
-                yield return (msgctxt ?? string.Empty, msgid, msgstr);
-
-            msgctxt = DecodePoString(line[8..].Trim());
-            msgid = null;
-            msgstr = null;
-            inMsgctxt = true;
-            inMsgid = false;
-            inMsgstr = false;
-        }
-        else if (line.StartsWith("msgid "))
-        {
-            if (msgid != null && msgstr != null)
-                yield return (msgctxt ?? string.Empty, msgid, msgstr);
+                yield return (msgid, msgstr);
 
             msgid = DecodePoString(line[6..].Trim());
             msgstr = null;
-            inMsgctxt = false;
             inMsgid = true;
             inMsgstr = false;
         }
         else if (line.StartsWith("msgstr "))
         {
             msgstr = DecodePoString(line[7..].Trim());
-            inMsgctxt = false;
             inMsgid = false;
             inMsgstr = true;
         }
         else if (line.StartsWith('"'))
         {
-            if (inMsgctxt && msgctxt != null)
-                msgctxt += DecodePoString(line.Trim());
-            else if (inMsgid && msgid != null)
+            if (inMsgid && msgid != null)
                 msgid += DecodePoString(line.Trim());
             else if (inMsgstr && msgstr != null)
                 msgstr += DecodePoString(line.Trim());
@@ -166,18 +144,16 @@ static IEnumerable<(string msgctxt, string msgid, string msgstr)> ParsePoFile(st
         else if (string.IsNullOrWhiteSpace(line))
         {
             if (msgid != null && msgstr != null)
-                yield return (msgctxt ?? string.Empty, msgid, msgstr);
-            msgctxt = null;
+                yield return (msgid, msgstr);
             msgid = null;
             msgstr = null;
-            inMsgctxt = false;
             inMsgid = false;
             inMsgstr = false;
         }
     }
 
     if (msgid != null && msgstr != null)
-        yield return (msgctxt ?? string.Empty, msgid, msgstr);
+        yield return (msgid, msgstr);
 }
 
 static string DecodePoString(string s)
@@ -187,6 +163,7 @@ static string DecodePoString(string s)
     return s
         .Replace("\\\\", "\x00BACKSLASH\x00")
         .Replace("\\n", "\n")
+        .Replace("\\r", "\r")
         .Replace("\\t", "\t")
         .Replace("\\\"", "\"")
         .Replace("\x00BACKSLASH\x00", "\\");
@@ -217,16 +194,18 @@ static int CsvToPo(string csvPath, string outputDir)
         ["韓国語"]        = "ko",
     };
 
-    var rows = File.ReadAllLines(csvPath, Encoding.UTF8);
-    if (rows.Length == 0)
+    var content = File.ReadAllText(csvPath, Encoding.UTF8);
+    var allRows = ParseCsvRows(content).ToList();
+
+    if (allRows.Count == 0)
     {
         Console.Error.WriteLine("CSV file is empty.");
         return 1;
     }
 
-    var headers = ParseCsvRow(rows[0]);
-    // headers[0] = "KEY", headers[1] = "msgid", headers[2..] = language labels
-    var langCodes = headers.Skip(2)
+    var headers = allRows[0];
+    // headers[0] = "msgid", headers[1..] = language labels
+    var langCodes = headers.Skip(1)
         .Select(h => labelToCode.TryGetValue(h, out var code) ? code : h)
         .ToList();
 
@@ -245,20 +224,17 @@ static int CsvToPo(string csvPath, string outputDir)
             w.Write(poHeader);
         }
 
-        foreach (var row in rows.Skip(1))
+        foreach (var fields in allRows.Skip(1))
         {
-            if (string.IsNullOrWhiteSpace(row)) continue;
-            var fields = ParseCsvRow(row);
             if (fields.Count == 0) continue;
 
-            var key = fields[0];
-            var msgid = fields.Count > 1 ? fields[1] : string.Empty;
+            var msgid = fields[0];
+            if (string.IsNullOrWhiteSpace(msgid)) continue;
             for (int i = 0; i < langCodes.Count; i++)
             {
-                var msgstr = i + 2 < fields.Count ? fields[i + 2] : string.Empty;
+                var msgstr = i + 1 < fields.Count ? fields[i + 1] : string.Empty;
                 var w = writers[langCodes[i]];
                 w.Write("\r\n");
-                w.Write($"msgctxt \"{EscapePoString(key)}\"\r\n");
                 w.Write($"msgid \"{EscapePoString(msgid)}\"\r\n");
                 w.Write($"msgstr \"{EscapePoString(msgstr)}\"\r\n");
             }
@@ -273,39 +249,68 @@ static int CsvToPo(string csvPath, string outputDir)
     return 0;
 }
 
-static List<string> ParseCsvRow(string line)
+static IEnumerable<List<string>> ParseCsvRows(string content)
 {
-    var fields = new List<string>();
     int i = 0;
-    while (i < line.Length)
+    while (i < content.Length)
     {
-        if (line[i] == '"')
+        var fields = new List<string>();
+        var sb = new StringBuilder();
+        bool rowEnded = false;
+
+        while (i < content.Length)
         {
-            i++;
-            var sb = new StringBuilder();
-            while (i < line.Length)
+            char c = content[i];
+
+            if (c == '"')
             {
-                if (line[i] == '"')
+                i++;
+                while (i < content.Length)
                 {
-                    i++;
-                    if (i < line.Length && line[i] == '"') { sb.Append('"'); i++; }
-                    else break;
+                    if (content[i] == '"')
+                    {
+                        i++;
+                        if (i < content.Length && content[i] == '"') { sb.Append('"'); i++; }
+                        else break;
+                    }
+                    else sb.Append(content[i++]);
                 }
-                else sb.Append(line[i++]);
             }
+            else if (c == ',')
+            {
+                fields.Add(sb.ToString());
+                sb.Clear();
+                i++;
+            }
+            else if (c == '\r' && i + 1 < content.Length && content[i + 1] == '\n')
+            {
+                fields.Add(sb.ToString());
+                i += 2;
+                rowEnded = true;
+                break;
+            }
+            else if (c == '\n')
+            {
+                fields.Add(sb.ToString());
+                i++;
+                rowEnded = true;
+                break;
+            }
+            else
+            {
+                sb.Append(c);
+                i++;
+            }
+        }
+
+        if (!rowEnded)
             fields.Add(sb.ToString());
-        }
-        else
-        {
-            var end = line.IndexOf(',', i);
-            if (end < 0) end = line.Length;
-            fields.Add(line[i..end]);
-            i = end;
-        }
-        if (i < line.Length && line[i] == ',') i++;
+
+        if (fields.Count > 0)
+            yield return fields;
     }
-    return fields;
 }
 
+
 static string EscapePoString(string s) =>
-    s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\t", "\\t");
+    s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t");
